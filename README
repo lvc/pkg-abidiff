@@ -1,0 +1,49 @@
+NAME:
+  Package ABI Diff (Pkg-ABIdiff) — a tool for checking backward API/ABI compatibility of Linux packages (RPM or DEB).
+  
+  The tool searches for shared objects in packages and checks their ABIs for backward binary-compatibility (BC) and backward source-compatibility (SC).
+  
+  The tool does the following:
+  
+    1. Extracts input packages
+    2. Searches for *.debuginfo, *.so and header files
+    3. Creates ABI dumps of all found shared objects
+    4. Filters out private part of the ABI using info from header files
+    5. Matches shared objects in old and new packages
+    6. Compares ABI dumps of corresponding objects
+    7. Creates the BC and SC reports
+  
+  The tool is intended for Linux maintainers who are interested in ensuring backward compatibility, i.e. allow old applications to run (BC) or to be recompiled (SC) with newer versions of RPM/DEB packages.
+  
+  The tool is developed by Andrey Ponomarenko: http://abi-laboratory.pro/
+
+INSTALL:
+  sudo make install prefix=/usr
+
+REQUIRES:
+  Python 2
+  ABI Compliance Checker (1.99.23 or newer)
+  ABI Dumper (0.99.17 or newer)
+  Universal Ctags
+  GNU Binutils
+  Elfutils
+  G++
+
+USAGE:
+  pkg-abidiff -old [OLD PACKAGES] -new [NEW PACKAGES] [OPTIONS]
+  
+  e.g:
+  
+  pkg-abidiff -old P1 P1-DEBUG P1-DEV -new P2 P2-DEBUG P2-DEV
+  
+  P1       — RPM or DEB package to analyze (with *.so object files)
+  P1-DEBUG — corresponding debug-info package (*.debug files with DWARF info)
+  P1-DEV   — corresponding development package (header files, etc.)
+
+  You can omit passing of devel packages but the tool will not be able to filter out private part of the ABI from the analysis.
+
+EXAMPLE:
+  
+  
+ADV. USAGE:
+  For advanced usage, see output of -h option.

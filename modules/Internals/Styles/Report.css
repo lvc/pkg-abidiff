@@ -1,0 +1,74 @@
+body {
+    padding-left:15px;
+    padding:5px;
+    background-color:White;
+    color:Black;
+}
+h1 {
+    font-size:1.7em;
+    margin:0px;
+    padding:0px;
+}
+h2 {
+    font-size:1.25em;
+    white-space:nowrap;
+    text-decoration:underline;
+}
+hr {
+    color:Black;
+    background-color:Black;
+    height:1px;
+    border:0;
+}
+.tool {
+    font-size:2.375em;
+}
+table.summary {
+    font-family:"DejaVu Sans Mono", "Monaco", monospace;
+    font-size:0.94em;
+    border-collapse:collapse;
+    table-layout:fixed;
+}
+table.summary tr, table.summary td, table.summary th
+{
+    border:1px solid #777777;
+    border-collapse:collapse;
+    padding:0.1em;
+    padding-left:7px;
+    padding-right:7px;
+    text-align:center;
+}
+table.summary th {
+    background:#f2f2f2;
+    white-space:nowrap;
+}
+table.summary td {
+    padding-top:14px;
+    padding-bottom:14px;
+    white-space:nowrap;
+}
+a.num {
+    color:#000000;
+    text-decoration:none;
+}
+a.num:hover {
+    text-decoration:underline;
+}
+.ok {
+    background-color:#CCFFCC;
+}
+.warning {
+    background-color:#F4F4AF;
+}
+.incompatible, .removed {
+    background-color:#FFCCCC;
+}
+.added {
+    background-color:#C6DEFF;
+}
+table.summary td.object {
+    text-align:left;
+}
+.footer {
+    font-size:0.75em;
+}
