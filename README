@@ -1,5 +1,5 @@
 NAME:
-  Package ABI Diff (Pkg-ABIdiff) — a tool for checking backward API/ABI compatibility of Linux packages (RPM or DEB).
+  Package ABI Diff (Pkg-ABIdiff) — verify API/ABI compatibility of Linux packages (RPM or DEB).
   
   The tool searches for shared objects in packages and checks their ABIs for backward binary-compatibility (BC) and backward source-compatibility (SC).
   
@@ -14,6 +14,8 @@ NAME:
     7. Creates the BC and SC reports
   
   The tool is intended for Linux maintainers who are interested in ensuring backward compatibility, i.e. allow old applications to run (BC) or to be recompiled (SC) with newer versions of RPM/DEB packages.
+  
+  Sample report: http://abi-laboratory.pro/examples/compat_report/x86_64/libssh/0.6.3-3.fc21/0.7.3-1.fc24/
   
   The tool is developed by Andrey Ponomarenko: http://abi-laboratory.pro/
 
@@ -41,9 +43,22 @@ USAGE:
   P1-DEV   — corresponding development package (header files, etc.)
 
   You can omit passing of devel packages but the tool will not be able to filter out private part of the ABI from the analysis.
+  
+  Generated ABI dumps will be saved to ./abi_dump directory and will be reused next times. Use -rebuild additional option to regenerate ABI dumps. Generated report will be saved to ./compat_report directory. Use -rebuild-report additional option to regenerate report without regenerating of ABI dumps.
 
 EXAMPLE:
+  Having old packages:
+    OLD/libssh-0.6.3-3.fc21.x86_64.rpm
+    OLD/libssh-debuginfo-0.6.3-3.fc21.x86_64.rpm
+    OLD/libssh-devel-0.6.3-3.fc21.x86_64.rpm
   
+  and new ones:
+    NEW/libssh-0.7.3-1.fc24.x86_64.rpm
+    NEW/libssh-debuginfo-0.7.3-1.fc24.x86_64.rpm
+    NEW/libssh-devel-0.7.3-1.fc24.x86_64.rpm
   
+  we can compare them by this command:
+    pkg-abidiff -old OLD/libssh-*.rpm -new NEW/libssh-*.rpm
+
 ADV. USAGE:
   For advanced usage, see output of -h option.

@@ -1,11 +1,9 @@
 #!/usr/bin/python
-####################################################
+###############################################################
 # Package ABI Diff 0.95
-# Check backward API/ABI compatibility
-# of Linux packages (RPM or DEB)
+# Verify API/ABI compatibility of Linux packages (RPM or DEB)
 #
-# Copyright (C) 2016 Andrey Ponomarenko's
-# ABI Laboratory
+# Copyright (C) 2016 Andrey Ponomarenko's ABI Laboratory
 #
 # Written by Andrey Ponomarenko
 #
@@ -23,7 +21,7 @@
 #  Elfutils
 #  G++
 #
-####################################################
+###############################################################
 import argparse
 import re
 import sys
@@ -227,11 +225,11 @@ def compose_html_head(title, keywords, description):
 
 def get_bc_class(rate, total):
     cclass = "ok"
-    if int(rate)==100:
+    if float(rate)==100:
         if total:
             cclass = "warning"
     else:
-        if int(rate)>=90:
+        if float(rate)>=90:
             cclass = "warning"
         else:
             cclass = "incompatible"
@@ -241,6 +239,7 @@ def get_bc_class(rate, total):
 def format_num(num):
     num = re.sub(r"\A(\d+\.\d\d).*\Z", r"\1", str(num))
     num = re.sub(r"\A(\d+)\.0\Z", r"\1", num)
+    num = re.sub(r"(\.\d)0\Z", r"\1", num)
     return num
 
 def get_dumpversion(prog):
@@ -281,6 +280,11 @@ def is_empty_dump(path):
     
     f.close()
     return empty
+
+def count_symbols(path, obj, age):
+    print "Counting symbols in the ABI dump for "+os.path.basename(obj)+" ("+age+")"
+    count = subprocess.check_output(["abi-compliance-checker", "-count-symbols", path])
+    return int(count.rstrip())
 
 def scenario():
     signal.signal(signal.SIGINT, int_exit)
@@ -463,6 +467,10 @@ def scenario():
                         if fkind not in FILES[age]:
                             FILES[age][fkind] = {}
                         FILES[age][fkind][fpath] = 1
+                    
+                    if kind not in FILES[age]:
+                        FILES[age][kind] = {}
+                    FILES[age][kind][fpath] = 1
     
     abi_dump = {}
     soname = {}
@@ -686,9 +694,15 @@ def scenario():
         with open(TMP_DIR+"/log", "w") as log:
             subprocess.call(cmd_c, stdout=log)
         
-        if not os.path.exists(bin_report) or not os.path.exists(src_report):
-            print_err("ERROR: failed to create report for object "+obj)
-            continue
+        if ARGS.bin:
+            if not os.path.exists(bin_report):
+                print_err("ERROR: failed to create BC report for object "+obj)
+                continue
+        
+        if ARGS.src:
+            if not os.path.exists(src_report):
+                print_err("ERROR: failed to create SC report for object "+obj)
+                continue
         
         compat[obj] = {}
         res = []
@@ -707,6 +721,7 @@ def scenario():
         print_err("ERROR: failed to create reports for objects")
         s_exit(0)
     
+    object_symbols = {}
     changed_soname = {}
     for obj in mapped:
         new_obj = mapped[obj]
@@ -717,6 +732,86 @@ def scenario():
         if old_soname and new_soname and old_soname!=new_soname:
             changed_soname[obj] = new_soname
     
+    # JSON report
+    affected_t = 0
+    problems_t = 0
+    
+    added_t = 0
+    removed_t = 0
+    
+    affected_t_src = 0
+    problems_t_src = 0
+    
+    total_funcs = 0
+    
+    for obj in compat:
+        if ARGS.bin:
+            report = compat[obj]["bin"]
+        else:
+            report = compat[obj]["src"]
+        
+        old_dump = abi_dump["old"][obj]
+        funcs = count_symbols(old_dump, obj, "old")
+        object_symbols[obj] = funcs
+        
+        affected_t += float(report["affected"])*funcs
+        problems_t += int(report["total"])
+        
+        added_t += int(report["added"])
+        removed_t += int(report["removed"])
+        
+        if ARGS.src:
+            report_src = compat[obj]["src"]
+            affected_t_src += float(report_src["affected"])*funcs
+            problems_t_src += int(report_src["total"])
+        
+        total_funcs += funcs
+    
+    removed_by_objects_t = 0
+    
+    for obj in removed:
+        old_dump = abi_dump["old"][obj]
+        removed_by_objects_t += count_symbols(old_dump, obj, "old")
+    
+    bc = 100
+    
+    if total_funcs:
+        bc -= affected_t/total_funcs
+    
+    if ARGS.src:
+        bc_src = 100
+        if total_funcs:
+            bc_src -= affected_t_src/total_funcs
+    
+    if old_objects and removed:
+        delta = (1-(removed_by_objects_t/(total_funcs+removed_by_objects_t)))
+        bc *= delta
+        if ARGS.src:
+            bc_src *= delta
+    
+    bc = format_num(bc)
+    
+    if ARGS.src:
+        bc_src = format_num(bc_src)
+    
+    meta = []
+    if ARGS.bin:
+        meta.append("\"BC\": "+str(bc))
+    if ARGS.src:
+        meta.append("\"Source_BC\": "+str(bc_src))
+    meta.append("\"Added\": "+str(added_t))
+    meta.append("\"Removed\": "+str(removed_t))
+    if ARGS.bin:
+        meta.append("\"TotalProblems\": "+str(problems_t))
+    if ARGS.src:
+        meta.append("\"Source_TotalProblems\": "+str(problems_t_src))
+    meta.append("\"ObjectsAdded\": "+str(len(added)))
+    meta.append("\"ObjectsRemoved\": "+str(len(removed)))
+    meta.append("\"ChangedSoname\": "+str(len(changed_soname)))
+    
+    write_file(report_dir+"/meta.json", "{\n  "+",\n  ".join(meta)+"\n}\n")
+    
+    # HTML report
     n1 = PKGS_ATTR["old"]["name"]
     n2 = PKGS_ATTR["new"]["name"]
     
@@ -730,30 +825,70 @@ def scenario():
         title = n1+": API/ABI report between "+v1+" and "+v2+" versions"
         keywords = n1+", API, ABI, changes, compatibility, report"
         desc = "API/ABI compatibility report between "+v1+" and "+v2+" versions of the "+n1
-        report += " for "+n1+": <u>"+v1+"</u> vs <u>"+v2+"</u></h1>"
+        report += " for "+n1+": <u>"+v1+"</u> vs <u>"+v2+"</u>"
     else:
         title = "API/ABI report between "+n1+"-"+v1+" and "+n2+"-"+v2+" packages"
         keywords = n1+", "+n2+", API, ABI, changes, compatibility, report"
         desc = "API/ABI compatibility report between "+n1+"-"+v1+" and "+n2+"-"+v2+" packages"
         report += " for <u>"+n1+"-"+v1+"</u> vs <u>"+n2+"-"+v2+"</u>"
     
-    report += "<hr/>\n"
+    if not ARGS.bin:
+        report += " (source compatibility)"
+    
+    report += "</h1>\n"
+    
+    report += "<h2>Test Info</h2>\n"
+    report += "<table class='summary'>\n"
+    report += "<tr>\n"
+    report += "<th class='left'>Package</th><td class='right'>"+n1+"</td>\n"
+    report += "</tr>\n"
+    report += "<tr>\n"
+    report += "<th class='left'>Arch</th><td class='right'>"+arch+"</td>\n"
+    report += "</tr>\n"
+    report += "<tr>\n"
+    report += "<th class='left'>Old Version</th><td class='right'>"+v1+"</td>\n"
+    report += "</tr>\n"
+    report += "<tr>\n"
+    report += "<th class='left'>New Version</th><td class='right'>"+v2+"</td>\n"
+    report += "</tr>\n"
+    report += "<tr>\n"
+    if PUBLIC_ABI:
+        report += "<th class='left'>Subject</th><td class='right'>Public ABI</td>\n"
+    else:
+        report += "<th class='left'>Subject</th><td class='right'>Public ABI +<br/>Private ABI</td>\n"
+    report += "</tr>\n"
+    report += "</table>\n"
+    
+    report += "<h2>Test Result</h2>\n"
+    if ARGS.bin:
+        report += "Binary compatibility: <span class='"+get_bc_class(bc, problems_t)+"'>"+bc+"%</span>\n"
+        report += "<br/>\n"
+    
+    if ARGS.src:
+        report += "Source compatibility: <span class='"+get_bc_class(bc_src, problems_t_src)+"'>"+bc_src+"%</span>\n"
+        report += "<br/>\n"
     
     report += "<h2>Analyzed Packages</h2>\n"
     report += "<table class='summary'>\n"
     report += "<tr>\n"
-    report += "<th>Old</th><th>New</th>\n"
+    report += "<th>Old</th><th>New</th><th title='*.so, *.debug and header files'>Files</th>\n"
     report += "</tr>\n"
     report += "<tr>\n"
-    report += "<td class='object'>"+os.path.basename(PKGS["old"]["rel"])+"</td><td class='object'>"+os.path.basename(PKGS["new"]["rel"])+"</td>\n"
+    report += "<td class='object'>"+os.path.basename(PKGS["old"]["rel"])+"</td>\n"
+    report += "<td class='object'>"+os.path.basename(PKGS["new"]["rel"])+"</td>\n"
+    report += "<td class='center'>"+str(len(FILES["old"]["object"]))+"</td>\n"
     report += "</tr>\n"
     report += "<tr>\n"
-    report += "<td class='object'>"+os.path.basename(PKGS["old"]["debug"])+"</td><td class='object'>"+os.path.basename(PKGS["new"]["debug"])+"</td>\n"
+    report += "<td class='object'>"+os.path.basename(PKGS["old"]["debug"])+"</td>\n"
+    report += "<td class='object'>"+os.path.basename(PKGS["new"]["debug"])+"</td>\n"
+    report += "<td class='center'>"+str(len(FILES["old"]["debuginfo"]))+"</td>\n"
     report += "</tr>\n"
     
     if PUBLIC_ABI:
         report += "<tr>\n"
-        report += "<td class='object'>"+os.path.basename(PKGS["old"]["devel"])+"</td><td class='object'>"+os.path.basename(PKGS["new"]["devel"])+"</td>\n"
+        report += "<td class='object'>"+os.path.basename(PKGS["old"]["devel"])+"</td>\n"
+        report += "<td class='object'>"+os.path.basename(PKGS["new"]["devel"])+"</td>\n"
+        report += "<td class='center'>"+str(len(FILES["old"]["header"]))+"</td>\n"
         report += "</tr>\n"
     
     report += "</table>\n"
@@ -761,13 +896,14 @@ def scenario():
     report += "<h2>Shared Objects</h2>\n"
     report += "<table class='summary'>\n"
     
-    cols = 4
+    cols = 5
     if ARGS.bin and ARGS.src:
         report += "<tr>\n"
         report += "<th rowspan='2'>Object</th>\n"
-        report += "<th colspan='2'>Backward<br/>Compatibility</th>\n"
+        report += "<th colspan='2'>Compatibility</th>\n"
         report += "<th rowspan='2'>Added<br/>Symbols</th>\n"
         report += "<th rowspan='2'>Removed<br/>Symbols</th>\n"
+        report += "<th rowspan='2'>Total<br/>Symbols</th>\n"
         report += "</tr>\n"
         
         report += "<tr>\n"
@@ -786,6 +922,7 @@ def scenario():
         
         report += "<th>Added<br/>Symbols</th>\n"
         report += "<th>Removed<br/>Symbols</th>\n"
+        report += "<th>Total<br/>Symbols</th>\n"
         report += "</tr>\n"
     
     for obj in new_objects:
@@ -819,29 +956,29 @@ def scenario():
                 continue
             
             if ARGS.bin:
-                bc = 100 - float(compat[obj]["bin"]["affected"])
+                rate = 100 - float(compat[obj]["bin"]["affected"])
                 added_symbols = compat[obj]["bin"]["added"]
                 removed_symbols = compat[obj]["bin"]["removed"]
                 total = compat[obj]["bin"]["total"]
-                cclass = get_bc_class(bc, total)
+                cclass = get_bc_class(rate, total)
                 rpath = compat[obj]["bin"]["path"]
             
             if ARGS.src:
-                bc_src = 100 - float(compat[obj]["src"]["affected"])
+                rate_src = 100 - float(compat[obj]["src"]["affected"])
                 added_symbols_src = compat[obj]["src"]["added"]
                 removed_symbols_src = compat[obj]["src"]["removed"]
                 total_src = compat[obj]["src"]["total"]
-                cclass_src = get_bc_class(bc_src, total_src)
+                cclass_src = get_bc_class(rate_src, total_src)
                 rpath_src = compat[obj]["src"]["path"]
             
             if ARGS.bin:
                 report += "<td class=\'"+cclass+"\'>"
-                report += "<a href='"+rpath+"'>"+format_num(bc)+"%</a>"
+                report += "<a href='"+rpath+"'>"+format_num(rate)+"%</a>"
                 report += "</td>\n"
             
             if ARGS.src:
                 report += "<td class=\'"+cclass_src+"\'>"
-                report += "<a href='"+rpath_src+"'>"+format_num(bc_src)+"%</a>"
+                report += "<a href='"+rpath_src+"'>"+format_num(rate_src)+"%</a>"
                 report += "</td>\n"
             
             if not ARGS.bin:
@@ -864,6 +1001,8 @@ def scenario():
                     report += "<td class='removed'><a class='num' href='"+rpath+"#Removed'>"+removed_symbols+" removed</a></td>\n"
                 else:
                     report += "<td class='ok'>0</td>\n"
+            
+            report += "<td>"+str(object_symbols[obj])+"</td>\n"
         elif obj in removed:
             report += "<td colspan=\'"+str(cols)+"\' class='removed'>Removed from package</td>\n"
         
@@ -883,8 +1022,17 @@ def scenario():
         os.makedirs(report_dir)
     
     write_file(report_dir+"/index.html", report)
-    
     print "The report has been generated to: "+report_dir
+    
+    res = []
+    
+    if ARGS.bin:
+        res.append("Avg. BC: "+bc+"%")
+    
+    if ARGS.src:
+        res.append("Avg. SC: "+bc_src+"%")
+    
+    print ", ".join(res)
     
     s_exit(0)
 
