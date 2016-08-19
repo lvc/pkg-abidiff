@@ -40,7 +40,7 @@ USAGE:
   
   P1       — RPM or DEB package to analyze (with *.so object files)
   P1-DEBUG — corresponding debug-info package (*.debug files with DWARF info)
-  P1-DEV   — corresponding development package (header files, etc.)
+  P1-DEV   — corresponding development package (with header files)
 
   You can omit passing of devel packages but the tool will not be able to filter out private part of the ABI from the analysis.
   

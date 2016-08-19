@@ -23,10 +23,12 @@ hr {
     font-size:2.375em;
 }
 table.summary {
-    font-family:"DejaVu Sans Mono", "Monaco", monospace;
-    font-size:0.94em;
     border-collapse:collapse;
     table-layout:fixed;
+}
+table.summary, span.result {
+    font-family:"DejaVu Sans Mono", "Monaco", monospace;
+    font-size:0.94em;
 }
 table.summary tr, table.summary td, table.summary th
 {
