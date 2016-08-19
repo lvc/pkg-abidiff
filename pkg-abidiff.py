@@ -14,8 +14,8 @@
 # REQUIREMENTS
 # ============
 #  Python 2
-#  ABI Compliance Checker (1.99.23 or newer)
-#  ABI Dumper (0.99.17 or newer)
+#  ABI Compliance Checker (1.99.24 or newer)
+#  ABI Dumper (0.99.18 or newer)
 #  Universal Ctags
 #  GNU Binutils
 #  Elfutils
@@ -33,8 +33,8 @@ import subprocess
 
 TOOL_VERSION = "0.95"
 
-ABI_CC_VER = "1.99.23"
-ABI_DUMPER_VER = "0.99.17"
+ABI_CC_VER = "1.99.24"
+ABI_DUMPER_VER = "0.99.18"
 
 PKGS = {}
 PKGS_ATTR = {}
@@ -306,6 +306,7 @@ def scenario():
     parser.add_argument('-rebuild-report', help='rebuild report only', action='store_true')
     parser.add_argument('-rebuild-dumps', help='rebuild ABI dumps only', action='store_true')
     parser.add_argument('-ignore-tags', help='optional file with tags to ignore by ctags', metavar='PATH')
+    parser.add_argument('-keep-registers-and-offsets', help='dump used registers and stack offsets even if incompatible build options detected', action='store_true')
     parser.add_argument('-use-tu-dump', help='use g++ syntax tree instead of ctags to list symbols in headers', action='store_true')
     parser.add_argument('-include-preamble', help='specify preamble headers (separated by semicolon)', metavar='PATHS')
     parser.add_argument('-include-paths', help='specify include paths (separated by semicolon)', metavar='PATHS')
@@ -369,7 +370,7 @@ def scenario():
             fname = os.path.basename(pkg)
             kind = "rel"
             
-            if re.match(r".*-(devel-|dev-|dev_).*", fname):
+            if re.match(r".*-(headers-|devel-|dev-|dev_).*", fname):
                 kind = "devel"
             elif re.match(r".*-(debuginfo-|dbg_).*", fname):
                 kind = "debug"
@@ -477,7 +478,7 @@ def scenario():
     short_name = {}
     
     for age in ["old", "new"]:
-        print "Creating ABI dumps ("+age+")..."
+        print "Creating ABI dumps ("+age+") ..."
         if "debuginfo" not in FILES[age]:
             print_err("ERROR: debuginfo files are not found in "+age+" debuginfo package")
             s_exit(1)
@@ -486,8 +487,8 @@ def scenario():
             print_err("ERROR: shared objects are not found in "+age+" release package")
             s_exit(1)
         
-        dinfos = FILES[age]["debuginfo"].keys()
         objects = FILES[age]["object"].keys()
+        objects.sort(key=lambda x: x.lower())
         
         hdir = TMP_DIR+"/ext/"+age+"/devel"
         ddir = TMP_DIR+"/ext/"+age+"/debug"
@@ -547,6 +548,9 @@ def scenario():
                 cmd_d.append("-ignore-tags")
                 cmd_d.append(ARGS.ignore_tags)
             
+            if ARGS.keep_registers_and_offsets:
+                cmd_d.append("-keep-registers-and-offsets")
+            
             cmd_d.append(obj)
             
             with open(TMP_DIR+"/log", "w") as log:
@@ -556,7 +560,9 @@ def scenario():
                 print_err("ERROR: failed to create ABI dump for object "+oname+" ("+age+")")
                 s_exit(1)
             
-            if not is_empty_dump(obj_dump_path):
+            if is_empty_dump(obj_dump_path):
+                print "WARNING: empty ABI dump for "+oname+" ("+age+")"
+            else:
                 abi_dump[age][oname] = obj_dump_path
         
     print "Comparing ABIs ..."
@@ -657,7 +663,9 @@ def scenario():
             removed.pop(obj, None)
             added.pop(new_obj, None)
     
-    for obj in mapped:
+    mapped_objs = mapped.keys()
+    mapped_objs.sort(key=lambda x: x.lower())
+    for obj in mapped_objs:
         new_obj = mapped[obj]
         
         if obj not in abi_dump["old"]:
@@ -843,13 +851,13 @@ def scenario():
     report += "<th class='left'>Package</th><td class='right'>"+n1+"</td>\n"
     report += "</tr>\n"
     report += "<tr>\n"
-    report += "<th class='left'>Arch</th><td class='right'>"+arch+"</td>\n"
-    report += "</tr>\n"
-    report += "<tr>\n"
     report += "<th class='left'>Old Version</th><td class='right'>"+v1+"</td>\n"
     report += "</tr>\n"
     report += "<tr>\n"
     report += "<th class='left'>New Version</th><td class='right'>"+v2+"</td>\n"
+    report += "</tr>\n"
+    report += "<tr>\n"
+    report += "<th class='left'>Arch</th><td class='right'>"+arch+"</td>\n"
     report += "</tr>\n"
     report += "<tr>\n"
     if PUBLIC_ABI:
@@ -860,6 +868,7 @@ def scenario():
     report += "</table>\n"
     
     report += "<h2>Test Result</h2>\n"
+    report += "<span class='result'>\n"
     if ARGS.bin:
         report += "Binary compatibility: <span class='"+get_bc_class(bc, problems_t)+"'>"+bc+"%</span>\n"
         report += "<br/>\n"
@@ -867,6 +876,8 @@ def scenario():
     if ARGS.src:
         report += "Source compatibility: <span class='"+get_bc_class(bc_src, problems_t_src)+"'>"+bc_src+"%</span>\n"
         report += "<br/>\n"
+    
+    report += "</span>\n"
     
     report += "<h2>Analyzed Packages</h2>\n"
     report += "<table class='summary'>\n"

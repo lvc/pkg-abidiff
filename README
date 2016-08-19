@@ -24,9 +24,9 @@ INSTALL:
 
 REQUIRES:
   Python 2
-  ABI Compliance Checker (1.99.23 or newer)
-  ABI Dumper (0.99.17 or newer)
-  Universal Ctags
+  ABI Compliance Checker >= 1.99.24  (https://github.com/lvc/abi-compliance-checker)
+  ABI Dumper >= 0.99.18              (https://github.com/lvc/abi-dumper)
+  Universal Ctags                    (https://github.com/universal-ctags/ctags)
   GNU Binutils
   Elfutils
   G++
@@ -44,7 +44,9 @@ USAGE:
 
   You can omit passing of devel packages but the tool will not be able to filter out private part of the ABI from the analysis.
   
-  Generated ABI dumps will be saved to ./abi_dump directory and will be reused next times. Use -rebuild additional option to regenerate ABI dumps. Generated report will be saved to ./compat_report directory. Use -rebuild-report additional option to regenerate report without regenerating of ABI dumps.
+  Generated ABI dumps will be saved to ./abi_dump directory and will be reused next times. Use -rebuild additional option to regenerate ABI dumps.
+  
+  Generated report will be saved to ./compat_report directory. Use -rebuild-report additional option to regenerate report without regenerating of ABI dumps. The report is generated in visual HTML and machine-readable JSON formats.
 
 EXAMPLE:
   Having old packages:
