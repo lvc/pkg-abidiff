@@ -49,6 +49,8 @@ ORIG_DIR = os.getcwd()
 
 CMD_NAME = os.path.basename(__file__)
 
+ERROR_CODE = {"Ok":0, "Error":1, "Empty":10}
+
 def print_err(msg):
     sys.stderr.write(msg+"\n")
 
@@ -65,42 +67,51 @@ def get_modules():
             return d+"/modules"
     
     print_err("ERROR: can't find modules")
-    s_exit(1)
+    s_exit("Error")
 
 def s_exit(code):
+    global TMP_DIR, ERROR_CODE
     shutil.rmtree(TMP_DIR)
-    sys.exit(code)
+    sys.exit(ERROR_CODE[code])
 
 def int_exit(signal, frame):
-    s_exit(1)
+    s_exit("Error")
 
-def extract_pkg(age, kind):
+def exit_status(code, msg):
+    if code!="Ok":
+        print_err("ERROR: "+msg)
+    else:
+        print msg
+    
+    s_exit(code)
+
+def extract_pkgs(age, kind):
     global PKGS, TMP_DIR
-    pkg = PKGS[age][kind]
-    
-    m = re.match(r".*\.(\w+)\Z", os.path.basename(pkg))
-    fmt = None
-    
-    if m:
-        fmt = m.group(1)
-    
-    if not m or fmt not in ["rpm", "deb"]:
-        print_err("ERROR: unknown format of package \'"+pkg+"\'")
-        s_exit(1)
+    pkgs = PKGS[age][kind].keys()
     
     extr_dir = TMP_DIR+"/ext/"+age+"/"+kind
     
     if not os.path.exists(extr_dir):
         os.makedirs(extr_dir)
     
-    pkg_abs = os.path.abspath(pkg)
-    
-    os.chdir(extr_dir)
-    if fmt=="rpm":
-        subprocess.call("rpm2cpio \""+pkg_abs+"\" | cpio -id --quiet", shell=True)
-    elif fmt=="deb":
-        subprocess.call(["dpkg-deb", "--extract", pkg_abs, "."])
-    os.chdir(ORIG_DIR)
+    for pkg in pkgs:
+        m = re.match(r".*\.(\w+)\Z", os.path.basename(pkg))
+        fmt = None
+        
+        if m:
+            fmt = m.group(1)
+        
+        if not m or fmt not in ["rpm", "deb"]:
+            exit_status("Error", "unknown format of package \'"+pkg+"\'")
+        
+        pkg_abs = os.path.abspath(pkg)
+        
+        os.chdir(extr_dir)
+        if fmt=="rpm":
+            subprocess.call("rpm2cpio \""+pkg_abs+"\" | cpio -id --quiet", shell=True)
+        elif fmt=="deb":
+            subprocess.call(["dpkg-deb", "--extract", pkg_abs, "."])
+        os.chdir(ORIG_DIR)
     
     return extr_dir
 
@@ -112,6 +123,12 @@ def get_rel_path(path):
 
 def is_shared(path):
     return re.match(r"lib.*\.so(\..+|\Z)", path)
+
+def is_header(name):
+    if re.search(r"\.(h|hh|hp|hxx|hpp|h\+\+|tcc)\Z", name):
+        return True
+    
+    return False
 
 def get_fmt(path):
     m = re.match(r".*\.([^\.]+)\Z", path)
@@ -238,8 +255,8 @@ def get_bc_class(rate, total):
 
 def format_num(num):
     num = re.sub(r"\A(\d+\.\d\d).*\Z", r"\1", str(num))
-    num = re.sub(r"\A(\d+)\.0\Z", r"\1", num)
     num = re.sub(r"(\.\d)0\Z", r"\1", num)
+    num = re.sub(r"\A(\d+)\.0\Z", r"\1", num)
     return num
 
 def get_dumpversion(prog):
@@ -315,20 +332,16 @@ def scenario():
     ARGS = parser.parse_args()
     
     if not ARGS.old:
-        print_err("ERROR: old packages are not specified (-old option)")
-        s_exit(1)
+        exit_status("Error", "old packages are not specified (-old option)")
     
     if not ARGS.new:
-        print_err("ERROR: new packages are not specified (-new option)")
-        s_exit(1)
+        exit_status("Error", "new packages are not specified (-new option)")
     
     if cmp_vers(get_dumpversion("abi-compliance-checker"), ABI_CC_VER)<0:
-        print_err("ERROR: the version of ABI Compliance Checker should be "+ABI_CC_VER+" or newer")
-        s_exit(1)
+        exit_status("Error", "the version of ABI Compliance Checker should be "+ABI_CC_VER+" or newer")
     
     if cmp_vers(get_dumpversion("abi-dumper"), ABI_DUMPER_VER)<0:
-        print_err("ERROR: the version of ABI Dumper should be "+ABI_DUMPER_VER+" or newer")
-        s_exit(1)
+        exit_status("Error", "the version of ABI Dumper should be "+ABI_DUMPER_VER+" or newer")
     
     if not ARGS.bin and not ARGS.src:
         ARGS.bin = True
@@ -353,19 +366,17 @@ def scenario():
     for age in ["old", "new"]:
         for pkg in LIST[age]:
             if not os.path.exists(pkg):
-                print_err("ERROR: can't access '"+pkg+"'")
-                s_exit(1)
+                exit_status("Error", "can't access '"+pkg+"'")
     
     for age in ["old", "new"]:
-        parch = {}
         pname = {}
         pver = {}
+        parch = {}
         for pkg in LIST[age]:
             fmt = get_fmt(pkg)
             
             if fmt is None or fmt!="rpm" and fmt!="deb":
-                print_err("ERROR: unknown format of package "+pkg)
-                s_exit(1)
+                exit_status("Error", "unknown format of package "+pkg)
             
             fname = os.path.basename(pkg)
             kind = "rel"
@@ -375,74 +386,92 @@ def scenario():
             elif re.match(r".*-(debuginfo-|dbg_).*", fname):
                 kind = "debug"
             
-            PKGS[age][kind] = pkg
+            if kind in PKGS[age]:
+                if kind=="rel":
+                    exit_status("Error", "only one release package can be specified ("+age+")")
+                elif kind=="debug":
+                    exit_status("Error", "only one debug package can be specified ("+age+")")
+            else:
+                PKGS[age][kind] = {}
+            
+            PKGS[age][kind][pkg] = 1
+            
             attrs = get_attrs(pkg)
             if attrs:
                 pname[kind] = attrs[0]
-                pver[kind] = attrs[1]
-                parch[kind] = attrs[2]
+                
+                if kind in pver:
+                    if pver[kind]!=attrs[1]:
+                        exit_status("Error", "different versions of "+kind+" packages ("+age+")")
+                else:
+                    pver[kind] = attrs[1]
+                
+                if kind in parch:
+                    if parch[kind]!=attrs[2]:
+                        exit_status("Error", "different architectures of "+kind+" packages ("+age+")")
+                else:
+                    parch[kind] = attrs[2]
             else:
-                print_err("ERROR: can't read attributes of a package "+pkg)
-                s_exit(1)
+                exit_status("Error", "can't read attributes of a package "+pkg)
         
         if "rel" not in PKGS[age]:
-            print_err("ERROR: "+age+" release package is not specified")
-            s_exit(1)
+            exit_status("Error", age+" release package is not specified ("+age+")")
         
         if "debug" not in PKGS[age]:
-            print_err("ERROR: "+age+" debuginfo package is not specified")
-            s_exit(1)
+            exit_status("Error", age+" debuginfo package is not specified ("+age+")")
         
         if pver["rel"]!=pver["debug"]:
-            print "WARNING: versions of packages are not equal ("+age+")"
+            exit_status("Error", "different versions of packages ("+age+")")
         
         if "devel" in pver:
-            if pver["rel"]!=pver["devel"] or pver["debug"]!=pver["devel"]:
-                print "WARNING: versions of packages are not equal ("+age+")"
+            if pver["rel"]!=pver["devel"]:
+                exit_status("Error", "different versions of packages ("+age+")")
         
         if parch["rel"]!=parch["debug"]:
-            print_err("WARNING: architectures of packages are not equal ("+age+")")
-            s_exit(1)
+            exit_status("Error", "different architectures of packages ("+age+")")
         
         if "devel" in parch:
-            if parch["rel"]!=parch["devel"] or parch["debug"]!=parch["devel"]:
-                print "WARNING: architectures of packages are not equal ("+age+")"
+            if parch["rel"]!=parch["devel"]:
+                exit_status("Error", "different architectures of packages ("+age+")")
         
-        pname["debug"] = re.sub(r"\-(debuginfo|dbg)\Z", "", pname["debug"])
-        
-        PKGS_ATTR[age]["name"] = pname["debug"]
-        PKGS_ATTR[age]["ver"] = pver["debug"]
-        PKGS_ATTR[age]["arch"] = parch["debug"]
+        PKGS_ATTR[age]["name"] = pname["rel"]
+        PKGS_ATTR[age]["ver"] = pver["rel"]
+        PKGS_ATTR[age]["arch"] = parch["rel"]
+    
+    if len(PKGS["old"]["devel"].keys())!=len(PKGS["old"]["devel"].keys()):
+        exit_status("Error", "different number of old and new devel packages")
     
     if PKGS_ATTR["old"]["name"]!=PKGS_ATTR["new"]["name"]:
-        print "WARNING: names of old and new packages are not equal"
+        print "WARNING: different names of old and new packages"
     
     if PKGS_ATTR["old"]["arch"]!=PKGS_ATTR["new"]["arch"]:
-        print_err("ERROR: architectures of old and new packages are not equal")
-        s_exit(1)
+        exit_status("Error", "different architectures of old and new packages")
     
     global PUBLIC_ABI
     if "devel" in PKGS["old"]:
         if "devel" in PKGS["new"]:
             PUBLIC_ABI = True
         else:
-            print_err("ERROR: new devel package is not specified")
-            s_exit(1)
+            exit_status("Error", "new devel package is not specified")
     elif "devel" in PKGS["new"]:
-        print_err("ERROR: old devel package is not specified")
-        s_exit(1)
+        exit_status("Error", "old devel package is not specified")
     
     print "Extracting packages ..."
     global FILES
     FILES["old"] = {}
     FILES["new"] = {}
+    
+    e_dir = {}
+    e_dir["old"] = {}
+    e_dir["new"] = {}
+    
     for age in ["old", "new"]:
         for kind in ["rel", "debug", "devel"]:
             if kind not in PKGS[age]:
                 continue
             
-            e_dir = extract_pkg(age, kind)
-            for root, dirs, files in os.walk(e_dir):
+            e_dir[age][kind] = extract_pkgs(age, kind)
+            for root, dirs, files in os.walk(e_dir[age][kind]):
                 for f in files:
                     fpath = root+"/"+f
                     
@@ -457,11 +486,11 @@ def scenario():
                         if re.match(r".*\.debug\Z", f):
                             fkind = "debuginfo"
                         
-                        if get_fmt(PKGS[age]["debug"])=="deb":
+                        if get_fmt(PKGS[age]["debug"].keys()[0])=="deb":
                             if is_shared(f):
                                 fkind = "debuginfo"
                     elif kind=="devel":
-                        if not re.match(r".*\.(pc)\Z", f):
+                        if fpath.find("/include/")!=-1 or is_header(f):
                             fkind = "header"
                     
                     if fkind:
@@ -471,6 +500,7 @@ def scenario():
                     
                     if kind not in FILES[age]:
                         FILES[age][kind] = {}
+                    
                     FILES[age][kind][fpath] = 1
     
     abi_dump = {}
@@ -480,19 +510,13 @@ def scenario():
     for age in ["old", "new"]:
         print "Creating ABI dumps ("+age+") ..."
         if "debuginfo" not in FILES[age]:
-            print_err("ERROR: debuginfo files are not found in "+age+" debuginfo package")
-            s_exit(1)
+            exit_status("Error", "debuginfo files are not found in "+age+" debuginfo package")
         
         if "object" not in FILES[age]:
-            print_err("ERROR: shared objects are not found in "+age+" release package")
-            s_exit(1)
+            exit_status("Error", "shared objects are not found in "+age+" release package")
         
         objects = FILES[age]["object"].keys()
         objects.sort(key=lambda x: x.lower())
-        
-        hdir = TMP_DIR+"/ext/"+age+"/devel"
-        ddir = TMP_DIR+"/ext/"+age+"/debug"
-        odir = TMP_DIR+"/ext/"+age+"/rel"
         
         abi_dump[age] = {}
         soname[age] = {}
@@ -530,11 +554,11 @@ def scenario():
             cmd_d = ["abi-dumper", "-o", obj_dump_path, "-lver", pver]
             
             cmd_d.append("-search-debuginfo")
-            cmd_d.append(ddir)
+            cmd_d.append(e_dir[age]["debug"])
             
             if "header" in FILES[age]:
                 cmd_d.append("-public-headers")
-                cmd_d.append(hdir)
+                cmd_d.append(e_dir[age]["devel"])
             
             if ARGS.use_tu_dump:
                 cmd_d.append("-use-tu-dump")
@@ -557,8 +581,7 @@ def scenario():
                 subprocess.call(cmd_d, stdout=log)
             
             if not os.path.exists(obj_dump_path):
-                print_err("ERROR: failed to create ABI dump for object "+oname+" ("+age+")")
-                s_exit(1)
+                exit_status("Error", "failed to create ABI dump for object "+oname+" ("+age+")")
             
             if is_empty_dump(obj_dump_path):
                 print "WARNING: empty ABI dump for "+oname+" ("+age+")"
@@ -588,8 +611,7 @@ def scenario():
     new_objects = abi_dump["new"].keys()
     
     if objects and not old_objects:
-        print_err("ERROR: all ABI dumps are empty")
-        s_exit(0)
+        exit_status("Empty", "all ABI dumps are empty")
     
     old_objects.sort(key=lambda x: x.lower())
     new_objects.sort(key=lambda x: x.lower())
@@ -611,8 +633,7 @@ def scenario():
             if os.path.exists(report_dir+"/index.html"):
                 os.remove(report_dir+"/index.html")
         else:
-            print "The report already exists: "+report_dir
-            s_exit(0)
+            exit_status("Ok", "The report already exists: "+report_dir)
     
     compat = {}
     renamed_object = {}
@@ -726,8 +747,7 @@ def scenario():
         print ", ".join(res)
     
     if objects and not compat:
-        print_err("ERROR: failed to create reports for objects")
-        s_exit(0)
+        exit_status("Error", "failed to create reports for objects")
     
     object_symbols = {}
     changed_soname = {}
@@ -870,11 +890,11 @@ def scenario():
     report += "<h2>Test Result</h2>\n"
     report += "<span class='result'>\n"
     if ARGS.bin:
-        report += "Binary compatibility: <span class='"+get_bc_class(bc, problems_t)+"'>"+bc+"%</span>\n"
+        report += "Binary compatibility: <span class='"+get_bc_class(bc, problems_t)+"' title='Avg. binary compatibility rate'>"+bc+"%</span>\n"
         report += "<br/>\n"
     
     if ARGS.src:
-        report += "Source compatibility: <span class='"+get_bc_class(bc_src, problems_t_src)+"'>"+bc_src+"%</span>\n"
+        report += "Source compatibility: <span class='"+get_bc_class(bc_src, problems_t_src)+"' title='Avg. source compatibility rate'>"+bc_src+"%</span>\n"
         report += "<br/>\n"
     
     report += "</span>\n"
@@ -884,23 +904,38 @@ def scenario():
     report += "<tr>\n"
     report += "<th>Old</th><th>New</th><th title='*.so, *.debug and header files'>Files</th>\n"
     report += "</tr>\n"
-    report += "<tr>\n"
-    report += "<td class='object'>"+os.path.basename(PKGS["old"]["rel"])+"</td>\n"
-    report += "<td class='object'>"+os.path.basename(PKGS["new"]["rel"])+"</td>\n"
-    report += "<td class='center'>"+str(len(FILES["old"]["object"]))+"</td>\n"
-    report += "</tr>\n"
-    report += "<tr>\n"
-    report += "<td class='object'>"+os.path.basename(PKGS["old"]["debug"])+"</td>\n"
-    report += "<td class='object'>"+os.path.basename(PKGS["new"]["debug"])+"</td>\n"
-    report += "<td class='center'>"+str(len(FILES["old"]["debuginfo"]))+"</td>\n"
-    report += "</tr>\n"
     
-    if PUBLIC_ABI:
-        report += "<tr>\n"
-        report += "<td class='object'>"+os.path.basename(PKGS["old"]["devel"])+"</td>\n"
-        report += "<td class='object'>"+os.path.basename(PKGS["new"]["devel"])+"</td>\n"
-        report += "<td class='center'>"+str(len(FILES["old"]["header"]))+"</td>\n"
-        report += "</tr>\n"
+    target = {}
+    target["rel"] = "object"
+    target["debug"] = "debuginfo"
+    target["devel"] = "header"
+    
+    for kind in ["rel", "debug", "devel"]:
+        if kind=="devel" and not PUBLIC_ABI:
+            continue
+        
+        pkgs1 = PKGS["old"][kind].keys()
+        pkgs2 = PKGS["new"][kind].keys()
+        
+        pkgs1.sort(key=lambda x: x.lower())
+        pkgs2.sort(key=lambda x: x.lower())
+        
+        total = len(pkgs1)
+        
+        pfiles = False
+        
+        for i in range(0, total):
+            report += "<tr>\n"
+            report += "<td class='object'>"+os.path.basename(pkgs1[i])+"</td>\n"
+            report += "<td class='object'>"+os.path.basename(pkgs2[i])+"</td>\n"
+            if not pfiles:
+                if total>1:
+                    report += "<td class='center' rowspan='"+str(total)+"'>"
+                else:
+                    report += "<td class='center'>"
+                report += str(len(FILES["old"][target[kind]]))+"</td>\n"
+                pfiles = True
+            report += "</tr>\n"
     
     report += "</table>\n"
     
@@ -1045,6 +1080,6 @@ def scenario():
     
     print ", ".join(res)
     
-    s_exit(0)
+    s_exit("Ok")
 
 scenario()
