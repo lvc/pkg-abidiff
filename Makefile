@@ -1,14 +1,16 @@
 prefix ?= /usr
 tool = pkg-abidiff
-modules_dir = $(prefix)/share/$(tool)
+modules_dir = $(DESTDIR)$(prefix)/share/$(tool)
 modules = $(modules_dir)/modules
+tool_dir = $(DESTDIR)$(prefix)/bin
 
+.PHONY: install uninstall
 install:
-	cp -f $(tool).py $(prefix)/bin/$(tool)
-	chmod 755 $(prefix)/bin/$(tool)
+	mkdir -p $(tool_dir)
+	install -m 755 $(tool).py $(tool_dir)/$(tool)
 	mkdir -p $(modules)
 	cp -fr modules/* $(modules)/
 	chmod 755 -R $(modules)
 uninstall:
-	rm -f $(prefix)/bin/$(tool)
+	rm -f $(tool_dir)/$(tool)
 	rm -fr $(modules_dir)

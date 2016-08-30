@@ -49,7 +49,32 @@ ORIG_DIR = os.getcwd()
 
 CMD_NAME = os.path.basename(__file__)
 
-ERROR_CODE = {"Ok":0, "Error":1, "Empty":10}
+ERROR_CODE = {"Ok":0, "Error":1, "Empty":10, "NoDebug":11, "NoABI":12}
+
+def init_options():
+    global TOOL_VERSION, CMD_NAME
+    
+    desc = "Check backward API/ABI compatibility of Linux packages (RPM or DEB)"
+    parser = argparse.ArgumentParser(description=desc, epilog="example: "+CMD_NAME+" -old P1 P1-DEBUG P1-DEV -new P2 P2-DEBUG P2-DEV")
+    
+    parser.add_argument('-v', action='version', version='Package ABI Diff (Pkg-ABIdiff) '+TOOL_VERSION)
+    parser.add_argument('-old', help='list of old packages (package itself, debug-info and devel package)', nargs='*', metavar='PATH')
+    parser.add_argument('-new', help='list of new packages (package itself, debug-info and devel package)', nargs='*', metavar='PATH')
+    parser.add_argument('-o', '-report-dir', help='specify a directory to save report (default: ./compat_report)', metavar='DIR')
+    parser.add_argument('-dumps-dir', help='specify a directory to save and reuse ABI dumps (default: ./abi_dump)', metavar='DIR')
+    parser.add_argument('-bin', help='check binary compatibility only', action='store_true')
+    parser.add_argument('-src', help='check source compatibility only', action='store_true')
+    parser.add_argument('-rebuild', help='rebuild ABI dumps and report', action='store_true')
+    parser.add_argument('-rebuild-report', help='rebuild report only', action='store_true')
+    parser.add_argument('-rebuild-dumps', help='rebuild ABI dumps only', action='store_true')
+    parser.add_argument('-quiet', help='do not warn about incompatible build options', action='store_true')
+    parser.add_argument('-ignore-tags', help='optional file with tags to ignore by ctags', metavar='PATH')
+    parser.add_argument('-keep-registers-and-offsets', help='dump used registers and stack offsets even if incompatible build options detected', action='store_true')
+    parser.add_argument('-use-tu-dump', help='use g++ syntax tree instead of ctags to list symbols in headers', action='store_true')
+    parser.add_argument('-include-preamble', help='specify preamble headers (separated by semicolon)', metavar='PATHS')
+    parser.add_argument('-include-paths', help='specify include paths (separated by semicolon)', metavar='PATHS')
+    
+    return parser.parse_args()
 
 def print_err(msg):
     sys.stderr.write(msg+"\n")
@@ -75,6 +100,8 @@ def s_exit(code):
     sys.exit(ERROR_CODE[code])
 
 def int_exit(signal, frame):
+    print "\nGot INT signal"
+    print "Exiting"
     s_exit("Error")
 
 def exit_status(code, msg):
@@ -309,27 +336,8 @@ def scenario():
     global MOD_DIR
     MOD_DIR = get_modules()
     
-    desc = "Check backward API/ABI compatibility of Linux packages (RPM or DEB)"
-    parser = argparse.ArgumentParser(description=desc, epilog="example: "+CMD_NAME+" -old P1 P1-DEBUG P1-DEV -new P2 P2-DEBUG P2-DEV")
-    
-    parser.add_argument('-v', action='version', version='Package ABI Diff (Pkg-ABIdiff) '+TOOL_VERSION)
-    parser.add_argument('-old', help='list of old packages (package itself, debug-info and devel package)', nargs='*', metavar='PATH')
-    parser.add_argument('-new', help='list of new packages (package itself, debug-info and devel package)', nargs='*', metavar='PATH')
-    parser.add_argument('-o', '-report-dir', help='specify a directory to save report (default: ./compat_report)', metavar='DIR')
-    parser.add_argument('-dumps-dir', help='specify a directory to save and reuse ABI dumps (default: ./abi_dump)', metavar='DIR')
-    parser.add_argument('-bin', help='check binary compatibility only', action='store_true')
-    parser.add_argument('-src', help='check source compatibility only', action='store_true')
-    parser.add_argument('-rebuild', help='rebuild ABI dumps and report', action='store_true')
-    parser.add_argument('-rebuild-report', help='rebuild report only', action='store_true')
-    parser.add_argument('-rebuild-dumps', help='rebuild ABI dumps only', action='store_true')
-    parser.add_argument('-ignore-tags', help='optional file with tags to ignore by ctags', metavar='PATH')
-    parser.add_argument('-keep-registers-and-offsets', help='dump used registers and stack offsets even if incompatible build options detected', action='store_true')
-    parser.add_argument('-use-tu-dump', help='use g++ syntax tree instead of ctags to list symbols in headers', action='store_true')
-    parser.add_argument('-include-preamble', help='specify preamble headers (separated by semicolon)', metavar='PATHS')
-    parser.add_argument('-include-paths', help='specify include paths (separated by semicolon)', metavar='PATHS')
-    
     global ARGS
-    ARGS = parser.parse_args()
+    ARGS = init_options()
     
     if not ARGS.old:
         exit_status("Error", "old packages are not specified (-old option)")
@@ -510,10 +518,10 @@ def scenario():
     for age in ["old", "new"]:
         print "Creating ABI dumps ("+age+") ..."
         if "debuginfo" not in FILES[age]:
-            exit_status("Error", "debuginfo files are not found in "+age+" debuginfo package")
+            exit_status("NoDebug", "debuginfo files are not found in "+age+" debuginfo package")
         
         if "object" not in FILES[age]:
-            exit_status("Error", "shared objects are not found in "+age+" release package")
+            exit_status("NoABI", "shared objects are not found in "+age+" release package")
         
         objects = FILES[age]["object"].keys()
         objects.sort(key=lambda x: x.lower())
@@ -552,6 +560,9 @@ def scenario():
             print "Creating ABI dump for "+oname
             
             cmd_d = ["abi-dumper", "-o", obj_dump_path, "-lver", pver]
+            
+            if ARGS.quiet:
+                cmd_d.append("-quiet")
             
             cmd_d.append("-search-debuginfo")
             cmd_d.append(e_dir[age]["debug"])
