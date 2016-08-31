@@ -68,6 +68,7 @@ def init_options():
     parser.add_argument('-rebuild-report', help='rebuild report only', action='store_true')
     parser.add_argument('-rebuild-dumps', help='rebuild ABI dumps only', action='store_true')
     parser.add_argument('-quiet', help='do not warn about incompatible build options', action='store_true')
+    parser.add_argument('-debug', help='enable debug messages', action='store_true')
     parser.add_argument('-ignore-tags', help='optional file with tags to ignore by ctags', metavar='PATH')
     parser.add_argument('-keep-registers-and-offsets', help='dump used registers and stack offsets even if incompatible build options detected', action='store_true')
     parser.add_argument('-use-tu-dump', help='use g++ syntax tree instead of ctags to list symbols in headers', action='store_true')
@@ -203,6 +204,13 @@ def get_soname(path):
 
 def get_short_name(obj):
     m = re.match(r"(.+\.so)(\..+|\Z)", obj)
+    if m:
+        return m.group(1)
+    
+    return None
+
+def get_shortest_name(obj):
+    m = re.match(r"\A([^\d\.]+)", obj)
     if m:
         return m.group(1)
     
@@ -514,6 +522,7 @@ def scenario():
     abi_dump = {}
     soname = {}
     short_name = {}
+    shortest_name = {}
     
     for age in ["old", "new"]:
         print "Creating ABI dumps ("+age+") ..."
@@ -529,6 +538,7 @@ def scenario():
         abi_dump[age] = {}
         soname[age] = {}
         short_name[age] = {}
+        shortest_name[age] = {}
         
         parch = PKGS_ATTR[age]["arch"]
         pname = PKGS_ATTR[age]["name"]
@@ -546,6 +556,7 @@ def scenario():
             
             soname[age][oname] = get_soname(obj)
             short_name[age][oname] = get_short_name(oname)
+            shortest_name[age][oname] = get_shortest_name(oname)
             
             obj_dump_path = dump_dir+"/"+oname+"/ABI.dump"
             
@@ -602,6 +613,7 @@ def scenario():
     print "Comparing ABIs ..."
     soname_r = {}
     short_name_r = {}
+    shortest_name_r = {}
     
     for age in ["old", "new"]:
         soname_r[age] = {}
@@ -617,6 +629,13 @@ def scenario():
             if shname not in short_name_r[age]:
                 short_name_r[age][shname] = {}
             short_name_r[age][shname][obj] = 1
+        
+        shortest_name_r[age] = {}
+        for obj in shortest_name[age]:
+            shname = shortest_name[age][obj]
+            if shname not in shortest_name_r[age]:
+                shortest_name_r[age][shname] = {}
+            shortest_name_r[age][shname][obj] = 1
     
     old_objects = abi_dump["old"].keys()
     new_objects = abi_dump["new"].keys()
@@ -645,6 +664,8 @@ def scenario():
                 os.remove(report_dir+"/index.html")
         else:
             exit_status("Ok", "The report already exists: "+report_dir)
+    else:
+        os.makedirs(report_dir)
     
     compat = {}
     renamed_object = {}
@@ -654,9 +675,10 @@ def scenario():
         # match by SONAME
         if obj in soname["old"]:
             sname = soname["old"][obj]
-            bysoname = soname_r["new"][sname].keys()
-            if bysoname and len(bysoname)==1:
-                new_obj = bysoname[0]
+            if sname in soname_r["new"]:
+                bysoname = soname_r["new"][sname].keys()
+                if bysoname and len(bysoname)==1:
+                    new_obj = bysoname[0]
         
         # match by name
         if new_obj is None:
@@ -667,9 +689,19 @@ def scenario():
         if new_obj is None:
             if obj in short_name["old"]:
                 shname = short_name["old"][obj]
-                byshort = short_name_r["new"][shname].keys()
-                if byshort and len(byshort)==1:
-                    new_obj = byshort[0]
+                if shname in short_name_r["new"]:
+                    byshort = short_name_r["new"][shname].keys()
+                    if byshort and len(byshort)==1:
+                        new_obj = byshort[0]
+        
+        # match by shortest name
+        if new_obj is None:
+            if obj in shortest_name["old"]:
+                shname = shortest_name["old"][obj]
+                if shname in shortest_name_r["new"]:
+                    byshort = shortest_name_r["new"][shname].keys()
+                    if byshort and len(byshort)==1:
+                        new_obj = byshort[0]
         
         if new_obj is None:
             removed[obj] = 1
@@ -731,6 +763,9 @@ def scenario():
         cmd_c.append("-new")
         cmd_c.append(abi_dump["new"][new_obj])
         
+        if ARGS.debug:
+            print "Executing "+" ".join(cmd_c)
+        
         with open(TMP_DIR+"/log", "w") as log:
             subprocess.call(cmd_c, stdout=log)
         
@@ -757,7 +792,7 @@ def scenario():
         
         print ", ".join(res)
     
-    if objects and not compat:
+    if mapped_objs and not compat:
         exit_status("Error", "failed to create reports for objects")
     
     object_symbols = {}
@@ -774,6 +809,8 @@ def scenario():
     # JSON report
     affected_t = 0
     problems_t = 0
+    
+    affected_t_eff = 0
     
     added_t = 0
     removed_t = 0
@@ -793,8 +830,15 @@ def scenario():
         funcs = count_symbols(old_dump, obj, "old")
         object_symbols[obj] = funcs
         
-        affected_t += float(report["affected"])*funcs
+        affected_t_delta = float(report["affected"])*funcs
+        
+        affected_t += affected_t_delta
         problems_t += int(report["total"])
+        
+        if obj in changed_soname:
+            affected_t_eff += 100*funcs
+        else:
+            affected_t_eff += affected_t_delta
         
         added_t += int(report["added"])
         removed_t += int(report["removed"])
@@ -813,9 +857,11 @@ def scenario():
         removed_by_objects_t += count_symbols(old_dump, obj, "old")
     
     bc = 100
+    bc_eff = 100
     
     if total_funcs:
         bc -= affected_t/total_funcs
+        bc_eff -= affected_t_eff/total_funcs
     
     if ARGS.src:
         bc_src = 100
@@ -829,6 +875,7 @@ def scenario():
             bc_src *= delta
     
     bc = format_num(bc)
+    bc_eff = format_num(bc_eff)
     
     if ARGS.src:
         bc_src = format_num(bc_src)
@@ -836,6 +883,7 @@ def scenario():
     meta = []
     if ARGS.bin:
         meta.append("\"BC\": "+str(bc))
+        meta.append("\"BC_Effective\": "+str(bc_eff))
     if ARGS.src:
         meta.append("\"Source_BC\": "+str(bc_src))
     meta.append("\"Added\": "+str(added_t))
@@ -901,7 +949,9 @@ def scenario():
     report += "<h2>Test Result</h2>\n"
     report += "<span class='result'>\n"
     if ARGS.bin:
-        report += "Binary compatibility: <span class='"+get_bc_class(bc, problems_t)+"' title='Avg. binary compatibility rate'>"+bc+"%</span>\n"
+        report += "Binary compatibility: <span class='"+get_bc_class(bc_eff, problems_t)+"' title='Avg. binary compatibility rate'>"+bc_eff+"%</span>\n"
+        if changed_soname.keys():
+            report += " (<span class='incompatible' title='Effective binary compatibility is "+bc_eff+"%"+" due to changed SONAME'>changed SONAME</span>)"
         report += "<br/>\n"
     
     if ARGS.src:

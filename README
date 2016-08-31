@@ -42,7 +42,7 @@ USAGE:
   P1-DEBUG — corresponding debug-info package (*.debug files with DWARF info)
   P1-DEV   — corresponding development package (with header files)
 
-  You can omit passing of devel packages but the tool will not be able to filter out private part of the ABI from the analysis.
+  You can omit passing of devel packages but the tool will not be able to filter out private part of the ABI from the analysis in this case. You can specify multiple devel packages at a time (to analyze all related header files distributed in separate packages).
   
   Generated ABI dumps will be saved to ./abi_dump directory and will be reused next times. Use -rebuild additional option to regenerate ABI dumps.
   
