@@ -30,6 +30,8 @@ import tempfile
 import shutil
 import signal
 import subprocess
+import traceback
+import binascii
 
 TOOL_VERSION = "0.95"
 
@@ -149,8 +151,12 @@ def get_rel_path(path):
     path = re.sub(r"\Aext/(old|new)/(rel|debug|devel)/", "", path)
     return path
 
-def is_shared(path):
-    return re.match(r"lib.*\.so(\..+|\Z)", path)
+def is_object(path):
+    name = os.path.basename(path)
+    if re.search(r"lib.*\.so(\..+|\Z)", name):
+        if read_bytes(path)=="7f454c46":
+            return True
+    return False
 
 def is_header(name):
     if re.search(r"\.(h|hh|hp|hxx|hpp|h\+\+|tcc)\Z", name):
@@ -322,21 +328,33 @@ def cmp_vers(x, y):
     
     return 0
 
-def is_empty_dump(path):
-    empty = False
+def get_dump_attr(path):
+    attr = {}
+    attr["empty"] = False
+    attr["lang"] = None
     f = open(path, 'r')
     for line in f:
-        if line.find("'SymbolInfo'")!=-1:
-            empty = (line.find("'SymbolInfo' => {}")!=-1)
+        if line.find("'Language' =>")!=-1:
+            m = re.search(r"'Language' => '(.+)'", line)
+            if m:
+                attr["lang"] = m.group(1)
+        elif line.find("'SymbolInfo' =>")!=-1:
+            attr["empty"] = (line.find("'SymbolInfo' => {}")!=-1)
             break
     
     f.close()
-    return empty
+    return attr
 
 def count_symbols(path, obj, age):
     print "Counting symbols in the ABI dump for "+os.path.basename(obj)+" ("+age+")"
     count = subprocess.check_output(["abi-compliance-checker", "-count-symbols", path])
     return int(count.rstrip())
+
+def read_bytes(path):
+    fp = open(path, 'rb')
+    buf = fp.read()
+    fp.close()
+    return binascii.b2a_hex(buf[0:4])
 
 def scenario():
     signal.signal(signal.SIGINT, int_exit)
@@ -496,14 +514,14 @@ def scenario():
                     
                     fkind = None
                     if kind=="rel":
-                        if is_shared(f):
+                        if is_object(fpath):
                             fkind = "object"
                     elif kind=="debug":
                         if re.match(r".*\.debug\Z", f):
                             fkind = "debuginfo"
                         
                         if get_fmt(PKGS[age]["debug"].keys()[0])=="deb":
-                            if is_shared(f):
+                            if is_object(fpath):
                                 fkind = "debuginfo"
                     elif kind=="devel":
                         if fpath.find("/include/")!=-1 or is_header(f):
@@ -605,8 +623,12 @@ def scenario():
             if not os.path.exists(obj_dump_path):
                 exit_status("Error", "failed to create ABI dump for object "+oname+" ("+age+")")
             
-            if is_empty_dump(obj_dump_path):
+            dump_attr = get_dump_attr(obj_dump_path)
+            
+            if dump_attr["empty"]:
                 print "WARNING: empty ABI dump for "+oname+" ("+age+")"
+            elif dump_attr["lang"] not in ["C", "C++"]:
+                print "WARNING: unsupported language "+dump_attr["lang"]+" of "+oname+" ("+age+")"
             else:
                 abi_dump[age][oname] = obj_dump_path
         
@@ -641,7 +663,7 @@ def scenario():
     new_objects = abi_dump["new"].keys()
     
     if objects and not old_objects:
-        exit_status("Empty", "all ABI dumps are empty")
+        exit_status("Empty", "all ABI dumps are empty or invalid")
     
     old_objects.sort(key=lambda x: x.lower())
     new_objects.sort(key=lambda x: x.lower())
@@ -994,7 +1016,11 @@ def scenario():
                     report += "<td class='center' rowspan='"+str(total)+"'>"
                 else:
                     report += "<td class='center'>"
-                report += str(len(FILES["old"][target[kind]]))+"</td>\n"
+                if target[kind] in FILES["old"]:
+                    report += str(len(FILES["old"][target[kind]]))
+                else:
+                    report += "0"
+                report += "</td>\n"
                 pfiles = True
             report += "</tr>\n"
     
@@ -1143,4 +1169,8 @@ def scenario():
     
     s_exit("Ok")
 
-scenario()
+try:
+    scenario()
+except Exception as e:
+    print traceback.format_exc()
+    s_exit("Error")
