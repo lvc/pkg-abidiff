@@ -15,9 +15,9 @@ NAME:
   
   The tool is intended for Linux maintainers who are interested in ensuring backward compatibility, i.e. allow old applications to run (BC) or to be recompiled (SC) with newer versions of RPM/DEB packages.
   
-  Sample report: http://abi-laboratory.pro/examples/compat_report/x86_64/libssh/0.6.3-3.fc21/0.7.3-1.fc24/
+  Sample report: https://abi-laboratory.pro/examples/compat_report/x86_64/libssh/0.6.3-3.fc21/0.7.3-1.fc24/
   
-  The tool is developed by Andrey Ponomarenko: http://abi-laboratory.pro/
+  The tool is developed by Andrey Ponomarenko: https://abi-laboratory.pro/
 
 INSTALL:
   sudo make install prefix=/usr

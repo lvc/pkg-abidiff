@@ -35,6 +35,10 @@ import binascii
 
 TOOL_VERSION = "0.95"
 
+ABI_CC = "abi-compliance-checker"
+ABI_DUMPER = "abi-dumper"
+CTAGS = "ctags"
+
 ABI_CC_VER = "1.99.24"
 ABI_DUMPER_VER = "0.99.18"
 
@@ -46,7 +50,9 @@ PUBLIC_ABI = False
 ARGS = {}
 MOD_DIR = None
 
-TMP_DIR = tempfile.mkdtemp()
+TMP_DIR = None
+TMP_DIR_INT = None
+
 ORIG_DIR = os.getcwd()
 
 CMD_NAME = os.path.basename(__file__)
@@ -62,15 +68,16 @@ def init_options():
     parser.add_argument('-v', action='version', version='Package ABI Diff (Pkg-ABIdiff) '+TOOL_VERSION)
     parser.add_argument('-old', help='list of old packages (package itself, debug-info and devel package)', nargs='*', metavar='PATH')
     parser.add_argument('-new', help='list of new packages (package itself, debug-info and devel package)', nargs='*', metavar='PATH')
-    parser.add_argument('-o', '-report-dir', help='specify a directory to save report (default: ./compat_report)', metavar='DIR')
+    parser.add_argument('-report-dir', '-o', help='specify a directory to save report (default: ./compat_report)', metavar='DIR')
     parser.add_argument('-dumps-dir', help='specify a directory to save and reuse ABI dumps (default: ./abi_dump)', metavar='DIR')
     parser.add_argument('-bin', help='check binary compatibility only', action='store_true')
     parser.add_argument('-src', help='check source compatibility only', action='store_true')
-    parser.add_argument('-rebuild', help='rebuild ABI dumps and report', action='store_true')
+    parser.add_argument('-rebuild', '-r', help='rebuild ABI dumps and report', action='store_true')
     parser.add_argument('-rebuild-report', help='rebuild report only', action='store_true')
     parser.add_argument('-rebuild-dumps', help='rebuild ABI dumps only', action='store_true')
     parser.add_argument('-quiet', help='do not warn about incompatible build options', action='store_true')
     parser.add_argument('-debug', help='enable debug messages', action='store_true')
+    parser.add_argument('-tmp-dir', help='set a directory to store temp files', metavar='DIR')
     parser.add_argument('-ignore-tags', help='optional file with tags to ignore by ctags', metavar='PATH')
     parser.add_argument('-keep-registers-and-offsets', help='dump used registers and stack offsets even if incompatible build options detected', action='store_true')
     parser.add_argument('-use-tu-dump', help='use g++ syntax tree instead of ctags to list symbols in headers', action='store_true')
@@ -97,9 +104,24 @@ def get_modules():
     print_err("ERROR: can't find modules")
     s_exit("Error")
 
+def check_cmd(prog):
+    for path in os.environ["PATH"].split(os.pathsep):
+        path = path.strip('"')
+        candidate = path+"/"+prog
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    
+    return None
+
 def s_exit(code):
-    global TMP_DIR, ERROR_CODE
-    shutil.rmtree(TMP_DIR)
+    global TMP_DIR, TMP_DIR_INT, ERROR_CODE
+    
+    chmod_777(TMP_DIR_INT)
+    shutil.rmtree(TMP_DIR_INT)
+    
+    if not ARGS.tmp_dir:
+        shutil.rmtree(TMP_DIR)
+    
     sys.exit(ERROR_CODE[code])
 
 def int_exit(signal, frame):
@@ -116,10 +138,10 @@ def exit_status(code, msg):
     s_exit(code)
 
 def extract_pkgs(age, kind):
-    global PKGS, TMP_DIR
+    global PKGS, TMP_DIR_INT
     pkgs = PKGS[age][kind].keys()
     
-    extr_dir = TMP_DIR+"/ext/"+age+"/"+kind
+    extr_dir = TMP_DIR_INT+"/ext/"+age+"/"+kind
     
     if not os.path.exists(extr_dir):
         os.makedirs(extr_dir)
@@ -146,8 +168,8 @@ def extract_pkgs(age, kind):
     return extr_dir
 
 def get_rel_path(path):
-    global TMP_DIR
-    path = path.replace(TMP_DIR+"/", "")
+    global TMP_DIR_INT
+    path = path.replace(TMP_DIR_INT+"/", "")
     path = re.sub(r"\Aext/(old|new)/(rel|debug|devel)/", "", path)
     return path
 
@@ -304,6 +326,10 @@ def get_dumpversion(prog):
     ver = subprocess.check_output([prog, "-dumpversion"])
     return ver.rstrip()
 
+def get_version(prog):
+    ver = subprocess.check_output([prog, "--version"])
+    return ver.rstrip()
+
 def cmp_vers(x, y):
     xp = x.split(".")
     yp = y.split(".")
@@ -346,8 +372,9 @@ def get_dump_attr(path):
     return attr
 
 def count_symbols(path, obj, age):
+    global ABI_CC
     print "Counting symbols in the ABI dump for "+os.path.basename(obj)+" ("+age+")"
-    count = subprocess.check_output(["abi-compliance-checker", "-count-symbols", path])
+    count = subprocess.check_output([ABI_CC, "-count-symbols", path])
     return int(count.rstrip())
 
 def read_bytes(path):
@@ -355,6 +382,9 @@ def read_bytes(path):
     buf = fp.read()
     fp.close()
     return binascii.b2a_hex(buf[0:4])
+
+def chmod_777(path):
+    subprocess.call(["chmod", "777", "-R", path])
 
 def scenario():
     signal.signal(signal.SIGINT, int_exit)
@@ -365,16 +395,34 @@ def scenario():
     global ARGS
     ARGS = init_options()
     
+    global TMP_DIR, TMP_DIR_INT
+    if ARGS.tmp_dir:
+        TMP_DIR = ARGS.tmp_dir
+    else:
+        TMP_DIR = tempfile.mkdtemp()
+    
+    TMP_DIR_INT = TMP_DIR+"/PKG_ABIDIFF_TMP"
+    if not os.path.exists(TMP_DIR_INT):
+        os.makedirs(TMP_DIR_INT)
+    
     if not ARGS.old:
         exit_status("Error", "old packages are not specified (-old option)")
     
     if not ARGS.new:
         exit_status("Error", "new packages are not specified (-new option)")
     
-    if cmp_vers(get_dumpversion("abi-compliance-checker"), ABI_CC_VER)<0:
+    global ABI_CC, ABI_DUMPER, CTAGS
+    
+    if not check_cmd(ABI_CC):
+        exit_status("Error", "ABI Compliance Checker "+ABI_CC_VER+" or newer is not installed")
+    
+    if cmp_vers(get_dumpversion(ABI_CC), ABI_CC_VER)<0:
         exit_status("Error", "the version of ABI Compliance Checker should be "+ABI_CC_VER+" or newer")
     
-    if cmp_vers(get_dumpversion("abi-dumper"), ABI_DUMPER_VER)<0:
+    if not check_cmd(ABI_DUMPER):
+        exit_status("Error", "ABI Dumper "+ABI_DUMPER_VER+" or newer is not installed")
+    
+    if cmp_vers(get_dumpversion(ABI_DUMPER), ABI_DUMPER_VER)<0:
         exit_status("Error", "the version of ABI Dumper should be "+ABI_DUMPER_VER+" or newer")
     
     if not ARGS.bin and not ARGS.src:
@@ -397,21 +445,37 @@ def scenario():
     PKGS_ATTR["old"] = {}
     PKGS_ATTR["new"] = {}
     
+    pkg_formats = {}
     for age in ["old", "new"]:
         for pkg in LIST[age]:
             if not os.path.exists(pkg):
                 exit_status("Error", "can't access '"+pkg+"'")
+            
+            if not os.path.isfile(pkg):
+                exit_status("Error", "input argument is not a package")
+            
+            fmt = get_fmt(pkg)
+            
+            if fmt is None or fmt!="rpm" and fmt!="deb":
+                exit_status("Error", "unknown format of package "+pkg)
+            
+            pkg_formats[fmt] = 1
+    
+    if "rpm" in pkg_formats:
+        if not check_cmd("rpm"):
+            exit_status("Error", "can't find RPM package manager")
+        if not check_cmd("rpm2cpio"):
+            exit_status("Error", "can't find rpm2cpio")
+    
+    if "deb" in pkg_formats:
+        if not check_cmd("dpkg"):
+            exit_status("Error", "can't find dpkg")
     
     for age in ["old", "new"]:
         pname = {}
         pver = {}
         parch = {}
         for pkg in LIST[age]:
-            fmt = get_fmt(pkg)
-            
-            if fmt is None or fmt!="rpm" and fmt!="deb":
-                exit_status("Error", "unknown format of package "+pkg)
-            
             fname = os.path.basename(pkg)
             kind = "rel"
             
@@ -472,9 +536,6 @@ def scenario():
         PKGS_ATTR[age]["ver"] = pver["rel"]
         PKGS_ATTR[age]["arch"] = parch["rel"]
     
-    if len(PKGS["old"]["devel"].keys())!=len(PKGS["old"]["devel"].keys()):
-        exit_status("Error", "different number of old and new devel packages")
-    
     if PKGS_ATTR["old"]["name"]!=PKGS_ATTR["new"]["name"]:
         print "WARNING: different names of old and new packages"
     
@@ -485,10 +546,22 @@ def scenario():
     if "devel" in PKGS["old"]:
         if "devel" in PKGS["new"]:
             PUBLIC_ABI = True
+            if len(PKGS["old"]["devel"].keys())!=len(PKGS["new"]["devel"].keys()):
+                exit_status("Error", "different number of old and new devel packages")
         else:
             exit_status("Error", "new devel package is not specified")
     elif "devel" in PKGS["new"]:
         exit_status("Error", "old devel package is not specified")
+    else:
+        print "WARNING: devel packages are not specified, can't filter public ABI"
+    
+    if PUBLIC_ABI:
+        if not check_cmd(CTAGS):
+            exit_status("Error", "Universal Ctags program is not installed")
+        
+        ctags_ver = get_version(CTAGS)
+        if ctags_ver.lower().find("universal")==-1:
+            exit_status("Error", "requires Universal Ctags")
     
     print "Extracting packages ..."
     global FILES
@@ -588,7 +661,7 @@ def scenario():
             
             print "Creating ABI dump for "+oname
             
-            cmd_d = ["abi-dumper", "-o", obj_dump_path, "-lver", pver]
+            cmd_d = [ABI_DUMPER, "-o", obj_dump_path, "-lver", pver]
             
             if ARGS.quiet:
                 cmd_d.append("-quiet")
@@ -596,9 +669,10 @@ def scenario():
             cmd_d.append("-search-debuginfo")
             cmd_d.append(e_dir[age]["debug"])
             
-            if "header" in FILES[age]:
-                cmd_d.append("-public-headers")
-                cmd_d.append(e_dir[age]["devel"])
+            if PUBLIC_ABI:
+                if "header" in FILES[age]:
+                    cmd_d.append("-public-headers")
+                    cmd_d.append(e_dir[age]["devel"])
             
             if ARGS.use_tu_dump:
                 cmd_d.append("-use-tu-dump")
@@ -617,18 +691,28 @@ def scenario():
             
             cmd_d.append(obj)
             
-            with open(TMP_DIR+"/log", "w") as log:
-                subprocess.call(cmd_d, stdout=log)
+            if ARGS.debug:
+                print "Executing "+" ".join(cmd_d)
+            
+            ecode = 0
+            
+            with open(TMP_DIR_INT+"/log", "w") as log:
+                ecode = subprocess.call(cmd_d, stdout=log)
             
             if not os.path.exists(obj_dump_path):
-                exit_status("Error", "failed to create ABI dump for object "+oname+" ("+age+")")
+                if ecode==12:
+                    continue
+                else:
+                    exit_status("Error", "failed to create ABI dump for object "+oname+" ("+age+")")
             
             dump_attr = get_dump_attr(obj_dump_path)
             
             if dump_attr["empty"]:
                 print "WARNING: empty ABI dump for "+oname+" ("+age+")"
+                os.remove(obj_dump_path)
             elif dump_attr["lang"] not in ["C", "C++"]:
                 print "WARNING: unsupported language "+dump_attr["lang"]+" of "+oname+" ("+age+")"
+                os.remove(obj_dump_path)
             else:
                 abi_dump[age][oname] = obj_dump_path
         
@@ -673,8 +757,8 @@ def scenario():
     removed = {}
     
     report_dir = None
-    if ARGS.o:
-        report_dir = ARGS.o
+    if ARGS.report_dir:
+        report_dir = ARGS.report_dir
     else:
         report_dir = "compat_report"
         report_dir += "/"+PKGS_ATTR["old"]["arch"]+"/"+PKGS_ATTR["old"]["name"]
@@ -770,7 +854,7 @@ def scenario():
         bin_report = obj_report_dir+"/abi_compat_report.html"
         src_report = obj_report_dir+"/src_compat_report.html"
         
-        cmd_c = ["abi-compliance-checker", "-l", obj, "-component", "object"]
+        cmd_c = [ABI_CC, "-l", obj, "-component", "object"]
         
         if ARGS.bin:
             cmd_c.append("-bin")
@@ -788,7 +872,7 @@ def scenario():
         if ARGS.debug:
             print "Executing "+" ".join(cmd_c)
         
-        with open(TMP_DIR+"/log", "w") as log:
+        with open(TMP_DIR_INT+"/log", "w") as log:
             subprocess.call(cmd_c, stdout=log)
         
         if ARGS.bin:
@@ -1155,7 +1239,7 @@ def scenario():
         os.makedirs(report_dir)
     
     write_file(report_dir+"/index.html", report)
-    print "The report has been generated to: "+report_dir
+    print "The report has been generated to: "+report_dir+"/index.html"
     
     res = []
     
