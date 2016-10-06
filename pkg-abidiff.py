@@ -166,7 +166,7 @@ def extract_pkgs(age, kind):
         if m:
             fmt = m.group(1)
         
-        if not m or fmt not in ["rpm", "deb"]:
+        if not m or fmt not in ["rpm", "deb", "apk"]:
             exit_status("Error", "unknown format of package \'"+pkg+"\'")
         
         pkg_abs = os.path.abspath(pkg)
@@ -176,6 +176,9 @@ def extract_pkgs(age, kind):
             subprocess.call("rpm2cpio \""+pkg_abs+"\" | cpio -id --quiet", shell=True)
         elif fmt=="deb":
             subprocess.call(["dpkg-deb", "--extract", pkg_abs, "."])
+        elif fmt=="apk":
+            with open(TMP_DIR_INT+"/err", "a") as err_log:
+                subprocess.call(["tar", "-xf", pkg_abs], stderr=err_log)
         os.chdir(ORIG_DIR)
     
     return extr_dir
@@ -229,6 +232,20 @@ def get_attrs(path):
         name = attr["Package"]
         ver = attr["Version"]
         arch = attr["Architecture"]
+    elif fmt=="apk":
+        with open(TMP_DIR_INT+"/err", "a") as err_log:
+            r = subprocess.check_output(["tar", "-xf", path, ".PKGINFO", "-O"], stderr=err_log)
+        
+        attr = {}
+        
+        for line in r.split("\n"):
+            m = re.match(r"(\w+)\s*=\s*(.+)", line)
+            if m:
+                attr[m.group(1)] = m.group(2)
+        
+        name = attr["pkgname"]
+        ver = attr["pkgver"]
+        arch = attr["arch"]
     
     if name is not None and ver is not None and arch is not None:
         return [name, ver, arch]
@@ -469,7 +486,7 @@ def scenario():
             
             fmt = get_fmt(pkg)
             
-            if fmt is None or fmt!="rpm" and fmt!="deb":
+            if fmt is None or fmt not in ["rpm", "deb", "apk"]:
                 exit_status("Error", "unknown format of package "+pkg)
             
             pkg_formats[fmt] = 1
@@ -494,7 +511,7 @@ def scenario():
             
             if re.match(r".*-(headers-|devel-|dev-|dev_).*", fname):
                 kind = "devel"
-            elif re.match(r".*-(debuginfo-|dbg_).*", fname):
+            elif re.match(r".*-(debuginfo-|dbg[_\-]).*", fname):
                 kind = "debug"
             
             if kind in PKGS[age]:
@@ -709,7 +726,7 @@ def scenario():
             
             ecode = 0
             
-            with open(TMP_DIR_INT+"/log", "w") as log:
+            with open(TMP_DIR_INT+"/log", "a") as log:
                 ecode = subprocess.call(cmd_d, stdout=log)
             
             if not os.path.exists(obj_dump_path):
