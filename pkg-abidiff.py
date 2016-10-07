@@ -1,6 +1,6 @@
 #!/usr/bin/python
 #################################################################
-# Package ABI Diff 0.95
+# Package ABI Diff 0.96
 # Verify API/ABI compatibility of Linux packages (RPM or DEB)
 #
 # Copyright (C) 2016 Andrey Ponomarenko's ABI Laboratory
@@ -14,8 +14,8 @@
 # REQUIREMENTS
 # ============
 #  Python 2
-#  ABI Compliance Checker (1.99.24 or newer)
-#  ABI Dumper (0.99.18 or newer)
+#  ABI Compliance Checker (1.99.25 or newer)
+#  ABI Dumper (0.99.19 or newer)
 #  Universal Ctags
 #  GNU Binutils
 #  Elfutils
@@ -46,14 +46,14 @@ import subprocess
 import traceback
 import binascii
 
-TOOL_VERSION = "0.95"
+TOOL_VERSION = "0.96"
 
 ABI_CC = "abi-compliance-checker"
 ABI_DUMPER = "abi-dumper"
 CTAGS = "ctags"
 
-ABI_CC_VER = "1.99.24"
-ABI_DUMPER_VER = "0.99.18"
+ABI_CC_VER = "1.99.25"
+ABI_DUMPER_VER = "0.99.19"
 
 PKGS = {}
 PKGS_ATTR = {}

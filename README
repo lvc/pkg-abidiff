@@ -24,8 +24,8 @@ INSTALL:
 
 REQUIRES:
   Python 2
-  ABI Compliance Checker >= 1.99.24  (https://github.com/lvc/abi-compliance-checker)
-  ABI Dumper >= 0.99.18              (https://github.com/lvc/abi-dumper)
+  ABI Compliance Checker >= 1.99.25  (https://github.com/lvc/abi-compliance-checker)
+  ABI Dumper >= 0.99.19              (https://github.com/lvc/abi-dumper)
   Universal Ctags                    (https://github.com/universal-ctags/ctags)
   GNU Binutils
   Elfutils
