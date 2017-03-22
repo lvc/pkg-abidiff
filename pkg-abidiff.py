@@ -166,7 +166,7 @@ def extract_pkgs(age, kind):
         if m:
             fmt = m.group(1)
         
-        if not m or fmt not in ["rpm", "deb", "apk"]:
+        if not m or fmt not in ["rpm", "deb", "apk", "tbz2", "xpak"]:
             exit_status("Error", "unknown format of package \'"+pkg+"\'")
         
         pkg_abs = os.path.abspath(pkg)
@@ -179,6 +179,9 @@ def extract_pkgs(age, kind):
         elif fmt=="apk":
             with open(TMP_DIR_INT+"/err", "a") as err_log:
                 subprocess.call(["tar", "-xf", pkg_abs], stderr=err_log)
+        elif fmt in ("tbz2", "xpak"):
+            # note: this needs tar that detects compression algo
+            subprocess.call(["tar", "-xf", pkg_abs])
         os.chdir(ORIG_DIR)
     
     return extr_dir
@@ -246,6 +249,17 @@ def get_attrs(path):
         name = attr["pkgname"]
         ver = attr["pkgver"]
         arch = attr["arch"]
+    elif fmt in ("tbz2", "xpak"):
+        # no command-line tools to extract that metadata
+        import portage.versions
+        import portage.xpak
+
+        xpak = portage.xpak.tbz2(path).get_data()
+        namever = xpak["CATEGORY"].strip()+"/"+xpak["PF"].strip()
+        name = portage.versions.cpv_getkey(namever)
+        ver = portage.versions.cpv_getversion(namever)
+        # not strictly an arch but meaningful enough
+        arch = xpak["CHOST"].strip()
     
     if name is not None and ver is not None and arch is not None:
         return [name, ver, arch]
@@ -486,7 +500,7 @@ def scenario():
             
             fmt = get_fmt(pkg)
             
-            if fmt is None or fmt not in ["rpm", "deb", "apk"]:
+            if fmt is None or fmt not in ["rpm", "deb", "apk", "tbz2", "xpak"]:
                 exit_status("Error", "unknown format of package "+pkg)
             
             pkg_formats[fmt] = 1
@@ -500,6 +514,12 @@ def scenario():
     if "deb" in pkg_formats:
         if not check_cmd("dpkg"):
             exit_status("Error", "can't find dpkg")
+
+    if "tbz2" in pkg_formats or "xpak" in pkg_formats:
+        try:
+            import portage.xpak
+        except ImportError:
+            exit_status("Error", "can't find Portage modules")
     
     for age in ["old", "new"]:
         pname = {}
