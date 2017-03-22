@@ -1,11 +1,11 @@
 body {
-    padding:5px;
+    font-family:Arial, sans-serif;
     background-color:White;
     color:Black;
 }
 h1 {
-    font-size:1.7em;
-    margin:0px;
+    font-size:1.625em;
+    margin-bottom:0px;
 }
 h2 {
     font-size:1.25em;
@@ -18,9 +18,6 @@ hr {
     background-color:Black;
     height:1px;
     border:0;
-}
-.tool {
-    font-size:2.375em;
 }
 table.summary {
     border-collapse:collapse;
@@ -76,6 +73,9 @@ a.num:hover {
 }
 .warning {
     background-color:#F4F4AF;
+}
+.almost_compatible {
+    background-color:#FFDAA3;
 }
 .incompatible, .removed {
     background-color:#FFCCCC;
