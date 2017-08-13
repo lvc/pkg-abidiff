@@ -534,7 +534,7 @@ def scenario():
             
             if re.match(r".*-(headers-|devel-|dev-|dev_).*", fname):
                 kind = "devel"
-            elif re.match(r".*-(debuginfo-|dbg[_\-]).*", fname):
+            elif re.match(r".*-(debuginfo-|dbg[_\-]|dbgsym_).*", fname):
                 kind = "debug"
             
             if kind in PKGS[age]:
