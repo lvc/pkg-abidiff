@@ -3,7 +3,7 @@
 # Package ABI Diff 0.97
 # Verify API/ABI compatibility of Linux packages (RPM or DEB)
 #
-# Copyright (C) 2016-2017 Andrey Ponomarenko's ABI Laboratory
+# Copyright (C) 2016-2018 Andrey Ponomarenko's ABI Laboratory
 #
 # Written by Andrey Ponomarenko
 #
@@ -533,7 +533,7 @@ def scenario():
             
             if re.match(r".*-(headers-|devel-|dev-|dev_).*", fname):
                 kind = "devel"
-            elif re.match(r".*-(debuginfo-|dbg[_\-]|dbgsym_).*", fname):
+            elif re.match(r".*-(debuginfo-|dbg[_\-]).*", fname):
                 kind = "debug"
             
             if kind in PKGS[age]:
