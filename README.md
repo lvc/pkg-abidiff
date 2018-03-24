@@ -18,7 +18,7 @@ The tool searches for shared objects in packages and checks their ABIs for backw
 The tool does the following:
 
 1. Extracts input packages
-2. Searches for `\*.debuginfo`, `\*.so` and header files
+2. Searches for `*.debuginfo`, `*.so` and header files
 3. Creates ABI dumps of all found shared objects
 4. Filters out private part of the ABI using info from header files
 5. Matches shared objects in old and new packages
@@ -55,8 +55,8 @@ e.g.:
 
     pkg-abidiff -old P1 P1-debug P1-dev -new P2 P2-debug P2-dev
 
-P1       — RPM or DEB package to analyze (with `\*.so` object files),
-P1-debug — corresponding debug-info package (`\*.debug` files with DWARF info),
+P1       — RPM or DEB package to analyze (with `*.so` object files),
+P1-debug — corresponding debug-info package (`*.debug` files with DWARF info),
 P1-dev   — corresponding development package (with header files).
 
 You can omit passing of devel packages but the tool will not be able to filter out private part of the ABI from the analysis in this case. You can specify multiple devel packages at a time (to analyze all related header files distributed in separate packages).
